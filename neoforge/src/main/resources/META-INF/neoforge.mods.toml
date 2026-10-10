@@ -1,7 +1,7 @@
 modLoader = "javafml"
 loaderVersion = "${neoforge_loader_version_range}"
 license = "${license}"
-issueTrackerURL="https://github.com/Niix-Dan/Lucid-Gallery/issues"
+issueTrackerURL="https://github.com/Niix-Dan/PrintsMC/issues"
 
 [[mods]]
 modId = "${mod_id}"

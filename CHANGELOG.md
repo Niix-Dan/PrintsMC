@@ -1,3 +1,13 @@
+## 1.1.0
+* Changed project name to ` PrintsMC `
+* Refactored actions Modal
+* Added option to rename images
+* Changed image hosting provider to a proprietary one -> [printsmc.com](https://printsmc.com)
+* Added configurable time for image upload (24h / 7d / 30d)
+* Added button to copy the image directly to your clipboard
+
+---
+
 ## v1.0.2
 * Added a brand new mod icon.
 * Migrated the image upload host to Uguu.se (replacing catbox.moe).

@@ -1,5 +1,5 @@
 name: 🐛 Bug Report
-description: Create a report to help us improve Lucid Gallery
+description: Create a report to help us improve PrintsMC
 title: '[BUG] '
 labels: ["bug"]
 body:
@@ -37,7 +37,7 @@ body:
       description: Steps to reproduce the behavior.
       value: |
         1. Open the game.
-        2. Press 'G' (or your lucid gallery key bind).
+        2. Press 'G' (or your PrintsMC key bind).
         3. Look at the background/UI.
         4. See error.
     validations:

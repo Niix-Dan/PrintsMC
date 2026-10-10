@@ -17,7 +17,7 @@
   "entrypoints": {
     "main": [],
     "client": [
-      "com.niixlabs.lucidgallery.LucidGalleryClient"
+      "com.niixlabs.printsmc.PrintsMcFabric"
     ]
   },
   "mixins": [
