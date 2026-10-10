@@ -81,7 +81,7 @@ jobs:
           
           for jar in $folder/build/libs/*.jar; do
             if [[ -f "$jar" && ! "$jar" =~ -(dev|sources|plain|javadoc)\.jar$ ]]; then
-              cp "$jar" "release-artifacts/LucidGallery-${loader_name}-${VERSION}.jar"
+              cp "$jar" "release-artifacts/PrintsMC-${loader_name}-${VERSION}.jar"
             fi
           done
         }
@@ -111,7 +111,7 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         tag_name: v${{ env.MOD_VERSION }}
-        name: LucidGallery v${{ env.MOD_VERSION }}
+        name: PrintsMC v${{ env.MOD_VERSION }}
         body_path: RELEASE_CHANGELOG.md
         files: release-artifacts/*.jar
         draft: false

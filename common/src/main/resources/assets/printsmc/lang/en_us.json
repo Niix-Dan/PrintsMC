@@ -1,0 +1,50 @@
+{
+  "key.categories.printsmc.main": "PrintsMC",
+  "key.printsmc.open": "Open Screenshots Gallery",
+
+  "gui.printsmc.title": "PrintsMC",
+  "gui.printsmc.gallery_button": "Screenshots",
+
+  "gui.printsmc.loading": "Loading...",
+  "gui.printsmc.open_folder_button": "Open Folder",
+  "gui.printsmc.refresh_button": "Refresh",
+  "gui.printsmc.close_button": "Close",
+
+  "gui.printsmc.button.open_file": "Open File",
+  "gui.printsmc.button.copy_image": "Copy Image",
+  "gui.printsmc.button.rename": "Rename",
+  "gui.printsmc.button.delete": "Delete",
+  "gui.printsmc.button.close": "Close",
+  "gui.printsmc.slider.expires": "Expires: %s",
+  "gui.printsmc.button.upload": "Upload",
+  "gui.printsmc.button.uploading": "Uploading...",
+  "gui.printsmc.button.copy_link": "Copy Link",
+  "gui.printsmc.button.retry": "Retry Upload",
+  "gui.printsmc.button.cooldown": "Wait!",
+  "gui.printsmc.button.busy": "Busy...",
+
+  "gui.printsmc.modal.details_title": "Screenshot Details",
+  "gui.printsmc.modal.date": "Date: %s",
+  "gui.printsmc.modal.size": "Size: %s",
+  "gui.printsmc.modal.resolution": "Resolution: %s",
+  "gui.printsmc.modal.rename": "Rename file:",
+  "gui.printsmc.modal.link_display": "§aLink (Click to copy): §b%s",
+  "gui.printsmc.modal.error_display": "§cError: %s",
+  "gui.printsmc.modal.uploading_display": "§eUploading to printsmc.com...",
+
+  "gui.printsmc.scale_auto": "Auto",
+  "gui.printsmc.scale_label": "Scale: %s",
+
+  "gui.printsmc.action.delete_success": "Screenshot deleted successfully.",
+  "gui.printsmc.action.delete_fail": "Failed to delete screenshot.",
+  "gui.printsmc.action.copy_image_success": "Image copied to system clipboard!",
+  "gui.printsmc.action.copy_link_success": "Link copied to clipboard!",
+  "gui.printsmc.action.rename_success": "Screenshot renamed successfully.",
+  "gui.printsmc.action.rename_fail": "Failed to rename file.",
+
+  "gui.printsmc.upload.status.start": "Uploading screenshot to PrintsMC...",
+  "gui.printsmc.upload.status.success": "Screenshot uploaded successfully!",
+  "gui.printsmc.upload.status.fail": "Upload failed: %s",
+  "gui.printsmc.upload.status.cooldown": "Upload cooldown active. Please wait.",
+  "gui.printsmc.upload.status.busy": "Another upload is already in progress."
+}
