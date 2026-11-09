@@ -1,7 +1,6 @@
 package com.niixlabs.printsmc.mixin;
 
 import com.niixlabs.printsmc.client.gui.screen.GalleryScreen;
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.gui.screens.Screen;
@@ -12,13 +11,19 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(PauseScreen.class)
-public class PauseScreenMixin extends Screen {
-    protected PauseScreenMixin(Component title) { super(title); }
+public abstract class PauseScreenMixin extends Screen {
+    protected PauseScreenMixin(Component title) {
+        super(title);
+    }
 
     @Inject(method = "init", at = @At("RETURN"))
-    private void PrintsMC$addPauseButton(CallbackInfo ci) {
-        this.addRenderableWidget(Button.builder(Component.translatable("gui.printsmc.gallery_button"), b -> {
-            Minecraft.getInstance().setScreen(new GalleryScreen());
-        }).bounds(this.width - 105, this.height - 25, 100, 20).build());
+    private void printsmc$addGalleryButton(CallbackInfo ci) {
+        this.addRenderableWidget(
+                Button.builder(Component.translatable("gui.printsmc.gallery_button"), b -> {
+                    if (this.minecraft != null) {
+                        this.minecraft.setScreen(new GalleryScreen(this));
+                    }
+                }).bounds(this.width - 105, this.height - 25, 100, 20).build()
+        );
     }
 }

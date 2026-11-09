@@ -12,41 +12,31 @@ import java.io.FileInputStream;
 import java.io.InputStream;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class TextureLoader {
+public final class TextureLoader {
     private static final Map<String, DynamicTexture> LOADED_TEXTURES = new ConcurrentHashMap<>();
     private static final Map<String, ResourceLocation> LOCATIONS = new ConcurrentHashMap<>();
     private static final Set<String> LOADING = ConcurrentHashMap.newKeySet();
 
+    private TextureLoader() {}
+
     public static ResourceLocation getOrLoadTexture(File file) {
         String path = file.getAbsolutePath();
-
-        if (LOCATIONS.containsKey(path)) {
-            return LOCATIONS.get(path);
+        ResourceLocation existing = LOCATIONS.get(path);
+        if (existing != null) {
+            return existing;
         }
 
-        if (LOADING.contains(path)) {
+        if (!LOADING.add(path)) {
             return null;
         }
-        LOADING.add(path);
 
-        java.util.concurrent.CompletableFuture.runAsync(() -> {
+        CompletableFuture.runAsync(() -> {
             try (InputStream stream = new FileInputStream(file)) {
                 NativeImage image = NativeImage.read(stream);
-                RenderSystem.recordRenderCall(() -> {
-                    try {
-                        DynamicTexture texture = new DynamicTexture(image);
-                        String safeName = file.getName().toLowerCase().replaceAll("[^a-z0-9_.-]", "_");
-                        ResourceLocation location = ResourceLocation.fromNamespaceAndPath(Constants.MOD_ID, "screenshot_" + safeName);
-
-                        Minecraft.getInstance().getTextureManager().register(location, texture);
-                        LOADED_TEXTURES.put(path, texture);
-                        LOCATIONS.put(path, location);
-                    } finally {
-                        LOADING.remove(path);
-                    }
-                });
+                RenderSystem.recordRenderCall(() -> registerTextureOnRenderThread(path, file.getName(), image));
             } catch (Exception e) {
                 LOADING.remove(path);
             }
@@ -55,31 +45,48 @@ public class TextureLoader {
         return null;
     }
 
+    private static void registerTextureOnRenderThread(String path, String fileName, NativeImage image) {
+        try {
+            if (!LOADING.contains(path)) {
+                image.close();
+                return;
+            }
+            DynamicTexture texture = new DynamicTexture(image);
+            String safeName = fileName.toLowerCase().replaceAll("[^a-z0-9_.-]", "_");
+            ResourceLocation location = ResourceLocation.fromNamespaceAndPath(Constants.MOD_ID, "screenshot_" + safeName);
+
+            Minecraft.getInstance().getTextureManager().register(location, texture);
+            LOADED_TEXTURES.put(path, texture);
+            LOCATIONS.put(path, location);
+        } catch (Exception e) {
+            image.close();
+        } finally {
+            LOADING.remove(path);
+        }
+    }
+
     public static void unloadTexture(File file) {
         String path = file.getAbsolutePath();
-
-        if (LOCATIONS.containsKey(path)) {
-            Minecraft.getInstance().getTextureManager().release(LOCATIONS.get(path));
-            LOCATIONS.remove(path);
-        }
-
-        if (LOADED_TEXTURES.containsKey(path)) {
-            LOADED_TEXTURES.get(path).close();
-            LOADED_TEXTURES.remove(path);
-        }
-
         LOADING.remove(path);
+
+        ResourceLocation location = LOCATIONS.remove(path);
+        if (location != null) {
+            Minecraft.getInstance().getTextureManager().release(location);
+        }
+
+        DynamicTexture texture = LOADED_TEXTURES.remove(path);
+        if (texture != null) {
+            texture.close();
+        }
     }
 
     public static void clearCache() {
-        for (Map.Entry<String, ResourceLocation> entry : LOCATIONS.entrySet()) {
-            Minecraft.getInstance().getTextureManager().release(entry.getValue());
-        }
-        for (DynamicTexture texture : LOADED_TEXTURES.values()) {
-            texture.close();
-        }
-        LOADED_TEXTURES.clear();
-        LOCATIONS.clear();
         LOADING.clear();
+
+        LOCATIONS.values().forEach(loc -> Minecraft.getInstance().getTextureManager().release(loc));
+        LOCATIONS.clear();
+
+        LOADED_TEXTURES.values().forEach(DynamicTexture::close);
+        LOADED_TEXTURES.clear();
     }
 }

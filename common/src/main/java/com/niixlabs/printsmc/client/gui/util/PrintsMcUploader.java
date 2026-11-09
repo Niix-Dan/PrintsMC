@@ -6,6 +6,7 @@ import net.minecraft.client.Minecraft;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -14,9 +15,11 @@ import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.time.Duration;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -24,27 +27,29 @@ import java.util.regex.Pattern;
 public final class PrintsMcUploader {
     private static final String UPLOAD_URL = "https://printsmc.com/api/upload";
     private static final String USER_AGENT = "PrintsMC/1.2.0 (Java)";
-    private static final int MAX_REQUEST_RETRIES = 2;
-    private static final long RETRY_DELAY_MS = 500;
-    private static final int REQUEST_TIMEOUT_MS = 15000;
+    private static final int MAX_RETRIES = 2;
+    private static final long RETRY_DELAY_MS = 500L;
+    private static final Duration TIMEOUT = Duration.ofSeconds(15);
+    private static final Pattern URL_PATTERN = Pattern.compile("\"url\"\\s*:\\s*\"([^\"]+)\"");
 
     private static final HttpClient CLIENT = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofMillis(REQUEST_TIMEOUT_MS))
+            .connectTimeout(TIMEOUT)
             .build();
 
-    private static final ConcurrentHashMap<String, String> UPLOAD_CACHE = new ConcurrentHashMap<>();
-
-    private static volatile long lastUploadFinishedAt = 0L;
-    private static volatile boolean uploadInProgress = false;
+    private static final Map<String, String> UPLOAD_CACHE = new ConcurrentHashMap<>();
+    private static final AtomicBoolean UPLOAD_IN_PROGRESS = new AtomicBoolean(false);
+    private static volatile long lastUploadFinishedAt;
 
     public enum RejectReason { NONE, COOLDOWN, BUSY }
+
+    private PrintsMcUploader() {}
 
     public static String getCachedUrl(File file) {
         return UPLOAD_CACHE.get(file.getAbsolutePath());
     }
 
     public static RejectReason canUpload() {
-        if (uploadInProgress) {
+        if (UPLOAD_IN_PROGRESS.get()) {
             return RejectReason.BUSY;
         }
         long cooldownMillis = Math.max(0, ModConfig.screenshotUploadCooldownSeconds) * 1000L;
@@ -55,7 +60,7 @@ public final class PrintsMcUploader {
     }
 
     public static void uploadAsync(File file, String duration, BiConsumer<String, String> onResult) {
-        String cached = UPLOAD_CACHE.get(file.getAbsolutePath());
+        String cached = getCachedUrl(file);
         if (cached != null) {
             onResult.accept(cached, null);
             return;
@@ -67,18 +72,20 @@ public final class PrintsMcUploader {
             return;
         }
 
-        uploadInProgress = true;
+        if (!UPLOAD_IN_PROGRESS.compareAndSet(false, true)) {
+            onResult.accept(null, RejectReason.BUSY.name());
+            return;
+        }
 
-        CompletableFuture
-                .supplyAsync(() -> doUpload(file, duration))
+        CompletableFuture.supplyAsync(() -> executeUpload(file, duration))
                 .whenComplete((url, throwable) -> {
-                    uploadInProgress = false;
+                    UPLOAD_IN_PROGRESS.set(false);
                     lastUploadFinishedAt = System.currentTimeMillis();
 
                     Minecraft.getInstance().execute(() -> {
                         if (throwable != null) {
-                            Throwable cause = throwable.getCause();
-                            onResult.accept(null, cause != null ? cause.getMessage() : throwable.getMessage());
+                            Throwable cause = throwable.getCause() != null ? throwable.getCause() : throwable;
+                            onResult.accept(null, cause.getMessage());
                         } else {
                             UPLOAD_CACHE.put(file.getAbsolutePath(), url);
                             onResult.accept(url, null);
@@ -87,17 +94,17 @@ public final class PrintsMcUploader {
                 });
     }
 
-    private static String doUpload(File file, String duration) {
+    private static String executeUpload(File file, String duration) {
         try {
             byte[] imageBytes = Files.readAllBytes(file.toPath());
-            String boundary = "LucidBoundary" + UUID.randomUUID().toString().replace("-", "");
+            String boundary = "PrintsMCBoundary" + UUID.randomUUID().toString().replace("-", "");
             byte[] body = buildMultipartBody(boundary, file.getName(), imageBytes, duration);
 
-            for (int attempt = 0; attempt <= MAX_REQUEST_RETRIES; attempt++) {
+            for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
                 try {
                     HttpRequest request = HttpRequest.newBuilder()
                             .uri(URI.create(UPLOAD_URL))
-                            .timeout(Duration.ofMillis(REQUEST_TIMEOUT_MS))
+                            .timeout(TIMEOUT)
                             .header("User-Agent", USER_AGENT)
                             .header("Content-Type", "multipart/form-data; boundary=" + boundary)
                             .POST(HttpRequest.BodyPublishers.ofByteArray(body))
@@ -107,57 +114,59 @@ public final class PrintsMcUploader {
                     int status = response.statusCode();
                     String responseBody = response.body() == null ? "" : response.body().trim();
 
-                    if (status == 408 || status == 425 || status == 429 || status >= 500) {
-                        if (attempt < MAX_REQUEST_RETRIES) {
-                            Thread.sleep((long) (RETRY_DELAY_MS * Math.pow(2, attempt)));
-                            continue;
-                        }
+                    if (isRetryableStatus(status) && attempt < MAX_RETRIES) {
+                        Thread.sleep(RETRY_DELAY_MS * (1L << attempt));
+                        continue;
                     }
 
-                    if (status / 100 != 2) {
+                    if (status < 200 || status >= 300) {
                         throw new RuntimeException("HTTP " + status + " - " + (responseBody.isEmpty() ? "Unknown Error" : responseBody));
                     }
 
-                    Matcher matcher = Pattern.compile("\"url\"\\s*:\\s*\"([^\"]+)\"").matcher(responseBody);
+                    Matcher matcher = URL_PATTERN.matcher(responseBody);
                     if (matcher.find()) {
                         return matcher.group(1).replace("\\/", "/");
-                    } else {
-                        throw new RuntimeException("Failed to parse PrintsMC response.");
                     }
-
-                } catch (HttpTimeoutException | java.net.ConnectException e) {
-                    if (attempt < MAX_REQUEST_RETRIES) {
-                        Thread.sleep((long) (RETRY_DELAY_MS * Math.pow(2, attempt)));
+                    throw new RuntimeException("Failed to parse PrintsMC response.");
+                } catch (HttpTimeoutException | ConnectException e) {
+                    if (attempt < MAX_RETRIES) {
+                        Thread.sleep(RETRY_DELAY_MS * (1L << attempt));
                         continue;
                     }
                     throw new RuntimeException("Connection to printsmc.com failed.", e);
                 }
             }
             throw new RuntimeException("Upload failed after maximum retries.");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Upload interrupted.", e);
         } catch (Exception e) {
-            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             throw new RuntimeException(e.getMessage(), e);
         }
     }
 
-    private static byte[] buildMultipartBody(String boundary, String fileName, byte[] imageBytes, String duration) throws IOException {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        String crlf = "\r\n";
-        String twoHyphens = "--";
+    private static boolean isRetryableStatus(int status) {
+        return status == 408 || status == 425 || status == 429 || status >= 500;
+    }
 
-        // Duration field
-        out.write((twoHyphens + boundary + crlf).getBytes(StandardCharsets.UTF_8));
-        out.write(("Content-Disposition: form-data; name=\"duration\"" + crlf + crlf).getBytes(StandardCharsets.UTF_8));
-        out.write((duration + crlf).getBytes(StandardCharsets.UTF_8));
+    private static byte[] buildMultipartBody(String boundary, String fileName, byte[] fileBytes, String duration) throws IOException {
+        String mimeType = fileName.toLowerCase().endsWith(".png") ? "image/png" : "image/webp";
+        ByteArrayOutputStream out = new ByteArrayOutputStream(fileBytes.length + 512);
 
-        // File field
-        out.write((twoHyphens + boundary + crlf).getBytes(StandardCharsets.UTF_8));
-        out.write(("Content-Disposition: form-data; name=\"file\"; filename=\"" + fileName + "\"" + crlf).getBytes(StandardCharsets.UTF_8));
-        out.write(("Content-Type: image/webp" + crlf + crlf).getBytes(StandardCharsets.UTF_8));
-        out.write(imageBytes);
-        out.write(crlf.getBytes(StandardCharsets.UTF_8));
+        writeUtf8(out, "--" + boundary + "\r\n");
+        writeUtf8(out, "Content-Disposition: form-data; name=\"duration\"\r\n\r\n");
+        writeUtf8(out, duration + "\r\n");
 
-        out.write((twoHyphens + boundary + twoHyphens + crlf).getBytes(StandardCharsets.UTF_8));
+        writeUtf8(out, "--" + boundary + "\r\n");
+        writeUtf8(out, "Content-Disposition: form-data; name=\"file\"; filename=\"" + fileName + "\"\r\n");
+        writeUtf8(out, "Content-Type: " + mimeType + "\r\n\r\n");
+        out.write(fileBytes);
+        writeUtf8(out, "\r\n--" + boundary + "--\r\n");
+
         return out.toByteArray();
+    }
+
+    private static void writeUtf8(ByteArrayOutputStream out, String value) throws IOException {
+        out.write(value.getBytes(StandardCharsets.UTF_8));
     }
 }

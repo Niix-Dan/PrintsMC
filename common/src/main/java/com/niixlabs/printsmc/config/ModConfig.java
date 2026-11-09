@@ -1,6 +1,6 @@
 package com.niixlabs.printsmc.config;
 
-public class ModConfig {
+public final class ModConfig {
     @ConfigOption(comment = "Number of columns in the gallery grid")
     public static int gridColumns = 3;
 
@@ -46,6 +46,8 @@ public class ModConfig {
     @ConfigSection("Internal")
     @ConfigOption(comment = "Config watcher (Needs Restart)")
     public static boolean useConfigWatcher = false;
+
+    private ModConfig() {}
 
     public static void load() {
         ConfigManager.load(ModConfig.class);

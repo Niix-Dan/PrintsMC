@@ -5,6 +5,7 @@ import com.niixlabs.printsmc.client.gui.util.PrintsMcUploader;
 import com.niixlabs.printsmc.client.gui.util.TextureLoader;
 import com.niixlabs.printsmc.config.ModConfig;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -13,36 +14,42 @@ import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStream;
 import java.io.File;
-import java.text.SimpleDateFormat;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.Iterator;
 import java.util.function.Consumer;
 
 public class ScreenshotCard {
+    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+            .withZone(ZoneId.systemDefault());
 
     public enum UploadState { IDLE, UPLOADING, UPLOADED, ERROR }
 
     private File file;
     private final Consumer<String> statusCallback;
-    private final Runnable refreshCallback;
     private final Consumer<ScreenshotCard> selectCallback;
+
     private ResourceLocation textureLocation;
     private int x;
     private int y;
     private int width;
     private int height;
+
     private String metaDate = "";
     private String metaSize = "";
     private String metaResolution = "";
-    private boolean metaLoaded = false;
+    private boolean metaLoaded;
 
     private UploadState uploadState = UploadState.IDLE;
-    private String uploadUrl = null;
-    private String uploadError = null;
+    private String uploadUrl;
+    private String uploadError;
 
-    public ScreenshotCard(File file, Consumer<String> statusCallback, Runnable refreshCallback, Consumer<ScreenshotCard> selectCallback) {
+    public ScreenshotCard(File file, Consumer<String> statusCallback, Consumer<ScreenshotCard> selectCallback) {
         this.file = file;
         this.statusCallback = statusCallback;
-        this.refreshCallback = refreshCallback;
         this.selectCallback = selectCallback;
 
         String cachedUrl = PrintsMcUploader.getCachedUrl(file);
@@ -59,25 +66,18 @@ public class ScreenshotCard {
         this.height = height;
     }
 
-    public void loadMetadata() {
-        if (metaLoaded) return;
-        try {
-            this.metaDate = new SimpleDateFormat("yyyy-MM-dd HH:mm").format(file.lastModified());
-            this.metaSize = (file.length() / 1024) + " KB";
-            Iterator<ImageReader> iter = ImageIO.getImageReadersBySuffix("png");
-            if (!iter.hasNext()) iter = ImageIO.getImageReadersBySuffix("webp");
+    public boolean isVisibleInViewport(int viewportTop, int viewportBottom) {
+        return this.y + this.height >= viewportTop && this.y <= viewportBottom;
+    }
 
-            if (iter.hasNext()) {
-                ImageReader reader = iter.next();
-                try (ImageInputStream stream = ImageIO.createImageInputStream(file)) {
-                    reader.setInput(stream);
-                    this.metaResolution = reader.getWidth(reader.getMinIndex()) + "x" + reader.getHeight(reader.getMinIndex());
-                } finally {
-                    reader.dispose();
-                }
-            } else {
-                this.metaResolution = "Unknown";
-            }
+    public void loadMetadata() {
+        if (this.metaLoaded) {
+            return;
+        }
+        try {
+            this.metaDate = DATE_FORMATTER.format(Instant.ofEpochMilli(this.file.lastModified()));
+            this.metaSize = (this.file.length() / 1024) + " KB";
+            this.metaResolution = readImageDimensions(this.file);
         } catch (Exception e) {
             this.metaResolution = "Error";
             this.metaSize = "Error";
@@ -85,34 +85,66 @@ public class ScreenshotCard {
         this.metaLoaded = true;
     }
 
-    public void render(GuiGraphics guiGraphics, int mouseX, int mouseY) {
-        if (textureLocation == null) {
-            textureLocation = TextureLoader.getOrLoadTexture(file);
+    private static String readImageDimensions(File file) {
+        try (ImageInputStream stream = ImageIO.createImageInputStream(file)) {
+            if (stream != null) {
+                Iterator<ImageReader> readers = ImageIO.getImageReaders(stream);
+                if (readers.hasNext()) {
+                    ImageReader reader = readers.next();
+                    try {
+                        reader.setInput(stream);
+                        int w = reader.getWidth(reader.getMinIndex());
+                        int h = reader.getHeight(reader.getMinIndex());
+                        return w + "x" + h;
+                    } finally {
+                        reader.dispose();
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return "Unknown";
+    }
+
+    public void render(GuiGraphics graphics, int mouseX, int mouseY) {
+        if (this.textureLocation == null) {
+            this.textureLocation = TextureLoader.getOrLoadTexture(this.file);
         }
 
-        boolean isHovered = isMouseOver(mouseX, mouseY);
-        int bgColor = isHovered ? 0xFF3A3D40 : ModConfig.cardBackgroundColor;
+        Font font = Minecraft.getInstance().font;
+        boolean hovered = isMouseOver(mouseX, mouseY);
+        int bgColor = hovered ? 0xFF3A3D40 : ModConfig.cardBackgroundColor;
 
-        guiGraphics.fill(x, y, x + width, y + height, bgColor);
-        guiGraphics.renderOutline(x, y, width, height, isHovered ? 0xFF00AAFF : 0xFF555555);
+        graphics.fill(this.x, this.y, this.x + this.width, this.y + this.height, bgColor);
+        graphics.renderOutline(this.x, this.y, this.width, this.height, hovered ? 0xFF00AAFF : 0xFF555555);
 
-        if (textureLocation != null) {
-            guiGraphics.blit(textureLocation, x + 4, y + 4, 0, 0, width - 8, height - 28, width - 8, height - 28);
+        int thumbW = this.width - 8;
+        int thumbH = this.height - 28;
+
+        if (this.textureLocation != null) {
+            graphics.blit(this.textureLocation, this.x + 4, this.y + 4, 0, 0, thumbW, thumbH, thumbW, thumbH);
         } else {
-            guiGraphics.fill(x + 4, y + 4, x + width - 4, y + height - 24, 0xFF222222);
-            guiGraphics.drawCenteredString(Minecraft.getInstance().font, Component.translatable("gui.printsmc.loading").getString(), x + (width / 2), y + ((height - 24) / 2), 0xFFAAAAAA);
+            graphics.fill(this.x + 4, this.y + 4, this.x + this.width - 4, this.y + this.height - 24, 0xFF222222);
+            graphics.drawCenteredString(
+                    font,
+                    Component.translatable("gui.printsmc.loading").getString(),
+                    this.x + (this.width / 2),
+                    this.y + ((this.height - 24) / 2),
+                    0xFFAAAAAA
+            );
         }
 
-        String name = file.getName();
-        if (name.length() > 20) {
-            name = name.substring(0, 17) + "...";
-        }
-        guiGraphics.drawString(Minecraft.getInstance().font, name, x + 6, y + height - 16, 0xFFE0E0E0, false);
+        String displayName = formatDisplayName(this.file.getName());
+        graphics.drawString(font, displayName, this.x + 6, this.y + this.height - 16, 0xFFE0E0E0, false);
 
-        if (ModConfig.screenshotUploadEnabled && uploadState == UploadState.UPLOADED) {
-            guiGraphics.fill(x + width - 18, y + height - 18, x + width - 6, y + height - 6, 0xAA00AA55);
-            guiGraphics.drawCenteredString(Minecraft.getInstance().font, "☁", x + width - 12, y + height - 17, 0xFFFFFFFF);
+        if (ModConfig.screenshotUploadEnabled && this.uploadState == UploadState.UPLOADED) {
+            graphics.fill(this.x + this.width - 18, this.y + this.height - 18, this.x + this.width - 6, this.y + this.height - 6, 0xAA00AA55);
+            graphics.drawCenteredString(font, "☁", this.x + this.width - 12, this.y + this.height - 17, 0xFFFFFFFF);
         }
+    }
+
+    private static String formatDisplayName(String name) {
+        return name.length() > 20 ? name.substring(0, 17) + "..." : name;
     }
 
     public void unloadTexture() {
@@ -123,21 +155,28 @@ public class ScreenshotCard {
     }
 
     public boolean mouseClicked(double mouseX, double mouseY) {
-        if (!isMouseOver(mouseX, mouseY)) return false;
+        if (!isMouseOver(mouseX, mouseY)) {
+            return false;
+        }
         loadMetadata();
-        selectCallback.accept(this);
+        this.selectCallback.accept(this);
         return true;
     }
 
     public boolean isMouseOver(double mouseX, double mouseY) {
-        if (mouseY < 40) return false;
-        return mouseX >= x && mouseX <= x + width && mouseY >= y && mouseY <= y + height;
+        if (mouseY < 40) {
+            return false;
+        }
+        return mouseX >= this.x && mouseX <= this.x + this.width
+                && mouseY >= this.y && mouseY <= this.y + this.height;
     }
 
     public void startUpload(String duration) {
-        if (uploadState == UploadState.UPLOADING) return;
+        if (this.uploadState == UploadState.UPLOADING) {
+            return;
+        }
 
-        String cached = PrintsMcUploader.getCachedUrl(file);
+        String cached = PrintsMcUploader.getCachedUrl(this.file);
         if (cached != null) {
             this.uploadUrl = cached;
             this.uploadState = UploadState.UPLOADED;
@@ -146,66 +185,71 @@ public class ScreenshotCard {
 
         PrintsMcUploader.RejectReason reason = PrintsMcUploader.canUpload();
         if (reason != PrintsMcUploader.RejectReason.NONE) {
-            statusCallback.accept(Component.translatable(rejectMessageKey(reason)).getString());
+            this.statusCallback.accept(Component.translatable(rejectMessageKey(reason)).getString());
             return;
         }
 
         this.uploadState = UploadState.UPLOADING;
-        statusCallback.accept(Component.translatable("gui.printsmc.upload.status.start").getString());
+        this.statusCallback.accept(Component.translatable("gui.printsmc.upload.status.start").getString());
 
-        PrintsMcUploader.uploadAsync(file, duration, (url, error) -> {
+        PrintsMcUploader.uploadAsync(this.file, duration, (url, error) -> {
             if (error != null) {
                 this.uploadState = UploadState.ERROR;
                 this.uploadError = error;
-                statusCallback.accept(Component.translatable("gui.printsmc.upload.status.fail", error).getString());
+                this.statusCallback.accept(Component.translatable("gui.printsmc.upload.status.fail", error).getString());
             } else {
                 this.uploadState = UploadState.UPLOADED;
                 this.uploadUrl = url;
-                statusCallback.accept(Component.translatable("gui.printsmc.upload.status.success").getString());
+                this.statusCallback.accept(Component.translatable("gui.printsmc.upload.status.success").getString());
             }
         });
     }
 
     public void copyUploadLink() {
-        if (uploadUrl == null) return;
-        Minecraft.getInstance().keyboardHandler.setClipboard(uploadUrl);
-        statusCallback.accept(Component.translatable("gui.printsmc.action.copy_link_success").getString());
+        if (this.uploadUrl == null) {
+            return;
+        }
+        Minecraft.getInstance().keyboardHandler.setClipboard(this.uploadUrl);
+        this.statusCallback.accept(Component.translatable("gui.printsmc.action.copy_link_success").getString());
     }
 
     public void copyImageToSystemClipboard() {
-        ClipboardManager.sendImageToClipboard(file);
-        statusCallback.accept(Component.translatable("gui.printsmc.action.copy_image_success").getString());
+        ClipboardManager.sendImageToClipboard(this.file);
+        this.statusCallback.accept(Component.translatable("gui.printsmc.action.copy_image_success").getString());
     }
 
     public boolean renameFile(String newName) {
-        if (newName == null || newName.trim().isEmpty()) return false;
+        if (newName == null || newName.isBlank()) {
+            return false;
+        }
         try {
-            String originalName = file.getName();
-            String extension = originalName.substring(originalName.lastIndexOf("."));
+            String originalName = this.file.getName();
+            int dotIndex = originalName.lastIndexOf('.');
+            String extension = dotIndex >= 0 ? originalName.substring(dotIndex) : "";
 
-            String baseName = newName.trim().replaceAll("[\\\\/:*?\"<>|]", "_");
-            if (!baseName.endsWith(extension)) {
-                baseName += extension;
+            String sanitized = newName.trim().replaceAll("[\\\\/:*?\"<>|]", "_");
+            if (!sanitized.toLowerCase().endsWith(extension.toLowerCase())) {
+                sanitized += extension;
             }
 
-            File newFile = new File(file.getParentFile(), baseName);
-            if (newFile.exists() && !newFile.equals(file)) return false;
+            Path targetPath = this.file.toPath().resolveSibling(sanitized);
+            if (Files.exists(targetPath) && !targetPath.equals(this.file.toPath())) {
+                return false;
+            }
 
             unloadTexture();
-            if (file.renameTo(newFile)) {
-                this.file = newFile;
-                this.metaLoaded = false;
-                statusCallback.accept(Component.translatable("gui.printsmc.action.rename_success").getString());
-                refreshCallback.run();
-                return true;
-            }
+            Files.move(this.file.toPath(), targetPath);
+            this.file = targetPath.toFile();
+            this.metaLoaded = false;
+            this.statusCallback.accept(Component.translatable("gui.printsmc.action.rename_success").getString());
+            return true;
         } catch (Exception e) {
-            statusCallback.accept(Component.translatable("gui.printsmc.action.rename_fail").getString());
+            this.statusCallback.accept(Component.translatable("gui.printsmc.action.rename_fail").getString());
+            return false;
         }
-        return false;
     }
 
-    private String rejectMessageKey(PrintsMcUploader.RejectReason reason) {
+    private static String rejectMessageKey(PrintsMcUploader.RejectReason reason) {
         return switch (reason) {
             case COOLDOWN -> "gui.printsmc.upload.status.cooldown";
             case BUSY -> "gui.printsmc.upload.status.busy";
@@ -213,14 +257,12 @@ public class ScreenshotCard {
         };
     }
 
-    public int getY() { return y; }
-    public int getHeight() { return height; }
-    public File getFile() { return file; }
-    public ResourceLocation getTextureLocation() { return textureLocation; }
-    public String getMetaDate() { return metaDate; }
-    public String getMetaSize() { return metaSize; }
-    public String getMetaResolution() { return metaResolution; }
-    public UploadState getUploadState() { return uploadState; }
-    public String getUploadUrl() { return uploadUrl; }
-    public String getUploadError() { return uploadError; }
+    public File getFile() { return this.file; }
+    public ResourceLocation getTextureLocation() { return this.textureLocation; }
+    public String getMetaDate() { return this.metaDate; }
+    public String getMetaSize() { return this.metaSize; }
+    public String getMetaResolution() { return this.metaResolution; }
+    public UploadState getUploadState() { return this.uploadState; }
+    public String getUploadUrl() { return this.uploadUrl; }
+    public String getUploadError() { return this.uploadError; }
 }
