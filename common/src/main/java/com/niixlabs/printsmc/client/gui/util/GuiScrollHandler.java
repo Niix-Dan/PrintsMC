@@ -5,30 +5,22 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.util.Mth;
 
 public class GuiScrollHandler {
-    private double scrollOffset = 0;
-    private double maxScroll = 0;
-    private boolean dragging = false;
-    private double dragClickOffset = 0;
+    private double scrollOffset;
+    private double maxScroll;
+    private boolean dragging;
+    private double dragClickOffset;
 
     public double getScrollOffset() {
-        return scrollOffset;
+        return this.scrollOffset;
     }
 
     public void setScrollOffset(double offset) {
-        this.scrollOffset = Mth.clamp(offset, 0, maxScroll);
-    }
-
-    public double getMaxScroll() {
-        return maxScroll;
+        this.scrollOffset = Mth.clamp(offset, 0.0, this.maxScroll);
     }
 
     public void updateMaxScroll(double maxScroll) {
-        this.maxScroll = Math.max(0, maxScroll);
-        this.scrollOffset = Mth.clamp(this.scrollOffset, 0, this.maxScroll);
-    }
-
-    public boolean isDragging() {
-        return dragging;
+        this.maxScroll = Math.max(0.0, maxScroll);
+        this.scrollOffset = Mth.clamp(this.scrollOffset, 0.0, this.maxScroll);
     }
 
     public void setDragging(boolean dragging) {
@@ -36,41 +28,43 @@ public class GuiScrollHandler {
     }
 
     public int getThumbHeight(int viewportHeight) {
-        if (maxScroll <= 0) {
+        if (this.maxScroll <= 0) {
             return 0;
         }
-        return Math.max(ModConfig.screenMinScrollThumbHeight,
-                (int) ((viewportHeight / (float) (viewportHeight + maxScroll)) * viewportHeight));
+        int proportionalHeight = (int) ((viewportHeight / (float) (viewportHeight + this.maxScroll)) * viewportHeight);
+        return Math.max(ModConfig.screenMinScrollThumbHeight, proportionalHeight);
     }
 
     public int getThumbY(int viewportY, int viewportHeight) {
-        if (maxScroll <= 0) {
+        if (this.maxScroll <= 0) {
             return viewportY;
         }
-        return viewportY + (int) ((scrollOffset / maxScroll) * (viewportHeight - getThumbHeight(viewportHeight)));
+        int scrollableTrack = viewportHeight - getThumbHeight(viewportHeight);
+        return viewportY + (int) ((this.scrollOffset / this.maxScroll) * scrollableTrack);
     }
 
-    public void renderScrollbar(GuiGraphics guiGraphics, int width, int viewportY, int viewportHeight) {
-        if (maxScroll <= 0) {
+    public void renderScrollbar(GuiGraphics graphics, int screenWidth, int viewportY, int viewportHeight) {
+        if (this.maxScroll <= 0) {
             return;
         }
 
-        int scrollbarX = width - ModConfig.screenScrollbarRightMargin;
+        int scrollbarX = screenWidth - ModConfig.screenScrollbarRightMargin;
+        int scrollbarEndX = scrollbarX + ModConfig.screenScrollbarWidth;
         int thumbHeight = getThumbHeight(viewportHeight);
         int thumbY = getThumbY(viewportY, viewportHeight);
+        int thumbColor = this.dragging ? ModConfig.screenScrollbarThumbActive : ModConfig.screenScrollbarThumbIdle;
 
-        guiGraphics.fill(scrollbarX, viewportY, scrollbarX + ModConfig.screenScrollbarWidth, viewportY + viewportHeight, ModConfig.screenScrollbarTrackColor);
-        int thumbColor = dragging ? ModConfig.screenScrollbarThumbActive : ModConfig.screenScrollbarThumbIdle;
-        guiGraphics.fill(scrollbarX, thumbY, scrollbarX + ModConfig.screenScrollbarWidth, thumbY + thumbHeight, thumbColor);
+        graphics.fill(scrollbarX, viewportY, scrollbarEndX, viewportY + viewportHeight, ModConfig.screenScrollbarTrackColor);
+        graphics.fill(scrollbarX, thumbY, scrollbarEndX, thumbY + thumbHeight, thumbColor);
     }
 
-    public boolean handleMouseDown(double mouseX, double mouseY, int width, int viewportY, int viewportHeight) {
-        if (maxScroll <= 0) {
+    public boolean handleMouseDown(double mouseX, double mouseY, int screenWidth, int viewportY, int viewportHeight) {
+        if (this.maxScroll <= 0) {
             return false;
         }
 
-        int scrollbarX = width - ModConfig.screenScrollbarRightMargin;
-        if (mouseX < scrollbarX - 2 || mouseX > scrollbarX + 5) {
+        int scrollbarX = screenWidth - ModConfig.screenScrollbarRightMargin;
+        if (mouseX < scrollbarX - 2 || mouseX > scrollbarX + ModConfig.screenScrollbarWidth + 2) {
             return false;
         }
 
@@ -78,33 +72,32 @@ public class GuiScrollHandler {
         int thumbY = getThumbY(viewportY, viewportHeight);
 
         if (mouseY >= thumbY && mouseY <= thumbY + thumbHeight) {
-            dragging = true;
-            dragClickOffset = mouseY - thumbY;
+            this.dragging = true;
+            this.dragClickOffset = mouseY - thumbY;
             return true;
         }
         return false;
     }
 
     public boolean handleMouseDragged(double mouseY, int viewportY, int viewportHeight) {
-        if (dragging && maxScroll > 0) {
-            int thumbHeight = getThumbHeight(viewportHeight);
-            int trackHeight = viewportHeight - thumbHeight;
-
-            if (trackHeight > 0) {
-                double targetThumbY = mouseY - dragClickOffset;
-                double scrollPercentage = Mth.clamp((targetThumbY - viewportY) / trackHeight, 0.0, 1.0);
-                scrollOffset = scrollPercentage * maxScroll;
-            }
-            return true;
+        if (!this.dragging || this.maxScroll <= 0) {
+            return false;
         }
-        return false;
+
+        int trackHeight = viewportHeight - getThumbHeight(viewportHeight);
+        if (trackHeight > 0) {
+            double targetThumbY = mouseY - this.dragClickOffset;
+            double progress = Mth.clamp((targetThumbY - viewportY) / trackHeight, 0.0, 1.0);
+            this.scrollOffset = progress * this.maxScroll;
+        }
+        return true;
     }
 
     public boolean handleMouseScrolled(double scrollY, double scrollSpeed) {
-        if (maxScroll > 0) {
-            setScrollOffset(scrollOffset - (scrollY * scrollSpeed));
-            return true;
+        if (this.maxScroll <= 0) {
+            return false;
         }
-        return false;
+        setScrollOffset(this.scrollOffset - (scrollY * scrollSpeed));
+        return true;
     }
 }

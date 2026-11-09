@@ -1,4 +1,12 @@
-## 1.1.0
+## v1.2.0
+- Clicking screenshot messages in chat now opens the PrintsMC preview directly (#5)
+- Added Screenshots button to the Title Screen
+- Fixed slider hitbox issue on the Y-axis in the preview modal and top bar
+- Refactored codebase for better performance, memory management, and maintainability
+
+---
+
+## v1.1.0
 * Changed project name to ` PrintsMC `
 * Refactored actions Modal
 * Added option to rename images

@@ -8,151 +8,170 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.imageio.ImageIO;
-import java.awt.*;
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.GraphicsEnvironment;
+import java.awt.Toolkit;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 
-public class ClipboardManager {
+public final class ClipboardManager {
     private static final Logger LOGGER = LoggerFactory.getLogger(PrintsMC.class);
+    private static final boolean IS_WINDOWS = System.getProperty("os.name", "")
+            .toLowerCase(Locale.ROOT).contains("win");
+
+    private static final int GMEM_MOVEABLE = 0x0002;
+    private static final int CF_DIB = 8;
+    private static final int BITMAP_HEADER_SIZE = 40;
+
+    private ClipboardManager() {}
 
     public static void sendImageToClipboard(File imageFile) {
-        if (imageFile == null || !imageFile.exists()) return;
+        if (imageFile == null || !imageFile.exists()) {
+            return;
+        }
 
         CompletableFuture.runAsync(() -> {
-            if (System.getProperty("os.name").toLowerCase().contains("win")) {
-                if (tryWinJnaCopy(imageFile)) {
-                    return;
-                }
+            if (IS_WINDOWS && copyViaWin32Clipboard(imageFile)) {
+                return;
             }
-            fallbackAwtCopy(imageFile);
+            copyViaAwtClipboard(imageFile);
         });
     }
 
-    private static boolean tryWinJnaCopy(File file) {
+    private static boolean copyViaWin32Clipboard(File file) {
         try {
             BufferedImage source = ImageIO.read(file);
-            if (source == null) return false;
+            if (source == null) {
+                return false;
+            }
 
-            BufferedImage rgbImage = toRgbImage(source);
-            byte[] dibData = createDIB(rgbImage);
-
+            byte[] dibBytes = encodeToDib( flattenToRgb(source));
             WinUser32 user32 = WinUser32.INSTANCE;
             WinKernel32 kernel32 = WinKernel32.INSTANCE;
 
-            if (user32.OpenClipboard(null)) {
-                try {
-                    if (user32.EmptyClipboard()) {
-                        Pointer memoryBlock = kernel32.GlobalAlloc(0x0002, dibData.length);
-                        if (memoryBlock == null) return false;
-
-                        Pointer lockedMem = kernel32.GlobalLock(memoryBlock);
-                        if (lockedMem == null) return false;
-
-                        try {
-                            lockedMem.write(0, dibData, 0, dibData.length);
-                        } finally {
-                            kernel32.GlobalUnlock(memoryBlock);
-                        }
-
-                        Pointer result = user32.SetClipboardData(8, memoryBlock); // 8 = CF_DIB
-                        if (result != null) {
-                            return true;
-                        } else {
-                            kernel32.GlobalFree(memoryBlock);
-                        }
-                    }
-                } finally {
-                    user32.CloseClipboard();
-                }
+            if (!user32.OpenClipboard( null)) {
+                return false;
             }
-        } catch (Throwable e) {
-            LOGGER.debug("Native Windows clipboard write skipped, using AWT fallback: {}", e.getMessage());
+
+            try {
+                if (!user32.EmptyClipboard()) {
+                    return false;
+                }
+
+                Pointer hGlobal = kernel32.GlobalAlloc(GMEM_MOVEABLE, dibBytes.length);
+                if (hGlobal == null) {
+                    return false;
+                }
+
+                Pointer lockedPtr = kernel32.GlobalLock(hGlobal);
+                if (lockedPtr == null) {
+                    kernel32.GlobalFree(hGlobal);
+                    return false;
+                }
+
+                try {
+                    lockedPtr.write(0, dibBytes, 0, dibBytes.length);
+                } finally {
+                    kernel32.GlobalUnlock(hGlobal);
+                }
+
+                if (user32.SetClipboardData(CF_DIB, hGlobal) == null) {
+                    kernel32.GlobalFree(hGlobal);
+                    return false;
+                }
+                return true;
+            } finally {
+                user32.CloseClipboard();
+            }
+        } catch (Throwable t) {
+            LOGGER.debug("Win32 clipboard copy unavailable, falling back to AWT: {}", t.getMessage());
+            return false;
         }
-        return false;
     }
 
-    private static BufferedImage toRgbImage(BufferedImage img) {
-        BufferedImage rgb = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_RGB);
-        Graphics2D g2d = rgb.createGraphics();
-        g2d.setColor(Color.WHITE);
-        g2d.fillRect(0, 0, rgb.getWidth(), rgb.getHeight());
-        g2d.drawImage(img, 0, 0, null);
-        g2d.dispose();
+    private static BufferedImage flattenToRgb(BufferedImage source) {
+        BufferedImage rgb = new BufferedImage(source.getWidth(), source.getHeight(), BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = rgb.createGraphics();
+        g.setColor(Color.WHITE);
+        g.fillRect(0, 0, rgb.getWidth(), rgb.getHeight());
+        g.drawImage(source, 0, 0, null);
+        g.dispose();
         return rgb;
     }
 
-    private static byte[] createDIB(BufferedImage img) {
-        int w = img.getWidth();
-        int h = img.getHeight();
-        int imageSize = w * h * 4;
-        byte[] dib = new byte[40 + imageSize];
+    private static byte[] encodeToDib(BufferedImage img) {
+        int width = img.getWidth();
+        int height = img.getHeight();
+        int payloadSize = width * height * 4;
 
-        // BITMAPINFOHEADER size
-        dib[0] = 40;
-        // Width
-        dib[4] = (byte) (w & 0xFF);
-        dib[5] = (byte) ((w >> 8) & 0xFF);
-        dib[6] = (byte) ((w >> 16) & 0xFF);
-        dib[7] = (byte) ((w >> 24) & 0xFF);
-        // Height
-        dib[8] = (byte) (h & 0xFF);
-        dib[9] = (byte) ((h >> 8) & 0xFF);
-        dib[10] = (byte) ((h >> 16) & 0xFF);
-        dib[11] = (byte) ((h >> 24) & 0xFF);
-        // Planes & BitCount
-        dib[12] = 1;
-        dib[14] = 32;
-        // Image Size
-        dib[20] = (byte) (imageSize & 0xFF);
-        dib[21] = (byte) ((imageSize >> 8) & 0xFF);
-        dib[22] = (byte) ((imageSize >> 16) & 0xFF);
-        dib[23] = (byte) ((imageSize >> 24) & 0xFF);
+        ByteBuffer buffer = ByteBuffer.allocate(BITMAP_HEADER_SIZE + payloadSize)
+                .order(ByteOrder.LITTLE_ENDIAN);
 
-        int index = 40;
-        for (int y = h - 1; y >= 0; y--) {
-            for (int x = 0; x < w; x++) {
-                int pixel = img.getRGB(x, y);
-                dib[index]     = (byte) (pixel & 0xFF);         // Blue
-                dib[index + 1] = (byte) ((pixel >> 8) & 0xFF);  // Green
-                dib[index + 2] = (byte) ((pixel >> 16) & 0xFF); // Red
-                dib[index + 3] = (byte) 255;                    // Alpha
-                index += 4;
+        buffer.putInt(BITMAP_HEADER_SIZE);
+        buffer.putInt(width);
+        buffer.putInt(height);
+        buffer.putShort((short) 1);
+        buffer.putShort((short) 32);
+        buffer.putInt(0);
+        buffer.putInt(payloadSize);
+        buffer.putInt(0);
+        buffer.putInt(0);
+        buffer.putInt(0);
+        buffer.putInt(0);
+
+        int[] rowPixels = new int[width];
+        for (int y = height - 1; y >= 0; y--) {
+            img.getRGB(0, y, width, 1, rowPixels, 0, width);
+            for (int x = 0; x < width; x++) {
+                buffer.putInt(rowPixels[x] | 0xFF000000);
             }
         }
-        return dib;
+
+        return buffer.array();
     }
 
-    private static void fallbackAwtCopy(File file) {
+    private static void copyViaAwtClipboard(File file) {
         try {
-            if (GraphicsEnvironment.isHeadless()) return;
-            BufferedImage img = ImageIO.read(file);
-            if (img == null) return;
+            if (GraphicsEnvironment.isHeadless()) {
+                return;
+            }
+            BufferedImage source = ImageIO.read(file);
+            if (source == null) {
+                return;
+            }
 
-            BufferedImage rgb = toRgbImage(img);
-            Transferable transferable = new Transferable() {
-                @Override
-                public DataFlavor[] getTransferDataFlavors() {
-                    return new DataFlavor[]{DataFlavor.imageFlavor};
-                }
-                @Override
-                public boolean isDataFlavorSupported(DataFlavor flavor) {
-                    return DataFlavor.imageFlavor.equals(flavor);
-                }
-                @Override
-                public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException, IOException {
-                    if (DataFlavor.imageFlavor.equals(flavor)) return rgb;
-                    throw new UnsupportedFlavorException(flavor);
-                }
-            };
-
-            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(transferable, null);
+            BufferedImage rgb = flattenToRgb(source);
+            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new ImageTransferable(rgb), null);
         } catch (Exception e) {
-            LOGGER.error("Failed to copy image via AWT clipboard fallback", e);
+            LOGGER.error("Failed to copy image to system clipboard", e);
+        }
+    }
+
+    private record ImageTransferable(BufferedImage image) implements Transferable {
+        @Override
+        public DataFlavor[] getTransferDataFlavors() {
+            return new DataFlavor[]{DataFlavor.imageFlavor};
+        }
+
+        @Override
+        public boolean isDataFlavorSupported(DataFlavor flavor) {
+            return DataFlavor.imageFlavor.equals(flavor);
+        }
+
+        @Override
+        public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException {
+            if (!isDataFlavorSupported(flavor)) {
+                throw new UnsupportedFlavorException(flavor);
+            }
+            return this.image;
         }
     }
 

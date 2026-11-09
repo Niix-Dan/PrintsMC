@@ -1,5 +1,6 @@
 package com.niixlabs.printsmc.client.gui.util;
 
+import com.mojang.blaze3d.platform.Window;
 import com.niixlabs.printsmc.config.ModConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.util.Mth;
@@ -13,12 +14,7 @@ public final class GuiScale {
     private GuiScale() {}
 
     public static double targetScale(Minecraft minecraft) {
-        double screenWidth = minecraft.getWindow().getScreenWidth();
-        double screenHeight = minecraft.getWindow().getScreenHeight();
-
-        double maxScaleX = screenWidth / ModConfig.scaleMinVirtualWidth;
-        double maxScaleY = screenHeight / ModConfig.scaleMinVirtualHeight;
-        double maxSafeScale = Math.max(1.0, Math.floor(Math.min(maxScaleX, maxScaleY)));
+        double maxSafeScale = computeMaxSafeScale(minecraft.getWindow());
         double vanillaScale = minecraft.getWindow().getGuiScale();
 
         if (ModConfig.customGuiScale == 0) {
@@ -36,25 +32,22 @@ public final class GuiScale {
     }
 
     public static int maxSupportedScale(Minecraft minecraft) {
-        double screenWidth = minecraft.getWindow().getScreenWidth();
-        double screenHeight = minecraft.getWindow().getScreenHeight();
-
-        double maxScaleX = screenWidth / ModConfig.scaleMinVirtualWidth;
-        double maxScaleY = screenHeight / ModConfig.scaleMinVirtualHeight;
-        int maxSafeScale = (int) Math.max(1.0, Math.floor(Math.min(maxScaleX, maxScaleY)));
-
+        int maxSafeScale = (int) computeMaxSafeScale(minecraft.getWindow());
         return Math.min(maxSafeScale, MAX_CUSTOM_SCALE);
     }
 
     public static List<Integer> supportedScaleOptions(Minecraft minecraft) {
-        List<Integer> options = new ArrayList<>();
-        options.add(0);
-
         int maxScale = maxSupportedScale(minecraft);
-        for (int scale = 1; scale <= maxScale; scale++) {
+        List<Integer> options = new ArrayList<>(maxScale + 1);
+        for (int scale = 0; scale <= maxScale; scale++) {
             options.add(scale);
         }
-
         return options;
+    }
+
+    private static double computeMaxSafeScale(Window window) {
+        double maxScaleX = (double) window.getScreenWidth() / ModConfig.scaleMinVirtualWidth;
+        double maxScaleY = (double) window.getScreenHeight() / ModConfig.scaleMinVirtualHeight;
+        return Math.max(1.0, Math.floor(Math.min(maxScaleX, maxScaleY)));
     }
 }

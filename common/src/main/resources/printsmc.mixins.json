@@ -8,7 +8,10 @@
   "client": [
     "OptionsMixin",
     "MinecraftMixin",
-    "PauseScreenMixin"
+    "PauseScreenMixin",
+    "TitleScreenMixin",
+    "ScreenMixin",
+    "ScreenshotMixin"
   ],
   "server": [],
   "injectors": {
