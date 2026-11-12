@@ -1,3 +1,8 @@
+## v1.2.1
+- Added a config option to disable the screenshots button on the Title Screen/Pause Menu
+
+---
+
 ## v1.2.0
 - Clicking screenshot messages in chat now opens the PrintsMC preview directly (#5)
 - Added Screenshots button to the Title Screen

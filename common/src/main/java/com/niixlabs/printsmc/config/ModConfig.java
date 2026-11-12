@@ -7,6 +7,13 @@ public final class ModConfig {
     @ConfigOption(comment = "Card background color (ARGB)", hex = true)
     public static int cardBackgroundColor = 0xAA000000;
 
+    @ConfigSection("Widgets")
+    @ConfigOption(comment = "Render screenshots button on title screen")
+    public static boolean renderTitleScreenWidget = true;
+
+    @ConfigOption(comment = "Render screenshots button on pause menu")
+    public static boolean renderPauseMenuWidget = true;
+
     @ConfigSection("Scaling")
     @ConfigOption(comment = "Custom GUI Scale (0 = Auto, 1-8 = Fixed)")
     public static int customGuiScale = 0;

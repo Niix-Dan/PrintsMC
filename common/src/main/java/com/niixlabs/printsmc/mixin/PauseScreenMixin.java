@@ -1,6 +1,7 @@
 package com.niixlabs.printsmc.mixin;
 
 import com.niixlabs.printsmc.client.gui.screen.GalleryScreen;
+import com.niixlabs.printsmc.config.ModConfig;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.gui.screens.Screen;
@@ -18,6 +19,9 @@ public abstract class PauseScreenMixin extends Screen {
 
     @Inject(method = "init", at = @At("RETURN"))
     private void printsmc$addGalleryButton(CallbackInfo ci) {
+
+        if (!ModConfig.renderPauseMenuWidget) return;
+
         this.addRenderableWidget(
                 Button.builder(Component.translatable("gui.printsmc.gallery_button"), b -> {
                     if (this.minecraft != null) {
